@@ -26,10 +26,10 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-urlshortener}
       PORT: 4000
-      BASE_URL: ${BASE_URL:-http://go2url.xyz}
+      BASE_URL: ${BASE_URL:-https://go2url.xyz}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
-      FRONTEND_URL: ${FRONTEND_URL:-http://go2url.xyz}
+      FRONTEND_URL: ${FRONTEND_URL:-https://go2url.xyz}
     expose:
       - "4000"
 
@@ -37,7 +37,7 @@ services:
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://go2url.xyz}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://go2url.xyz}
     restart: unless-stopped
     depends_on:
       - backend
