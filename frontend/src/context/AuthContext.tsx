@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { authApi, AuthUser } from '@/lib/api';
 
@@ -25,10 +25,6 @@ interface Session {
 }
 
 function readStoredSession(): Session {
-  if (typeof window === 'undefined') {
-    return { token: null, user: null, isLoading: true };
-  }
-
   const storedToken = localStorage.getItem(TOKEN_KEY);
   const storedUser = localStorage.getItem(USER_KEY);
 
@@ -44,8 +40,14 @@ function readStoredSession(): Session {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session>(readStoredSession);
+  const [session, setSession] = useState<Session>({ token: null, user: null, isLoading: true });
   const router = useRouter();
+
+  // The server and the client's first render both know nothing about
+  // localStorage, so both must render the signed-out state; the real
+  // session is only readable once mounted in the browser.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => setSession(readStoredSession()), []);
 
   function persistSession(nextToken: string, nextUser: AuthUser) {
     localStorage.setItem(TOKEN_KEY, nextToken);
