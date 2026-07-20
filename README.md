@@ -1,6 +1,6 @@
 # URL Shortener
 
-A clean, full-stack URL shortener built as the foundation for a future DevSecOps portfolio project. This repository intentionally contains **only the application** — no Docker, CI/CD, or infrastructure tooling. Those are added separately, later, on top of this codebase.
+A clean, full-stack URL shortener built as the foundation for a future DevSecOps portfolio project.
 
 ## Overview
 
@@ -160,6 +160,43 @@ npm run lint:frontend
 ```
 
 Each workspace also has a `format` script that runs Prettier.
+
+## Docker Deployment
+
+The repository includes Docker Compose configurations for running the full stack (Postgres, backend, frontend, and an Nginx reverse proxy) behind a single public entrypoint. Nginx routes `/api/*` and short-code redirects to the backend and everything else to the Next.js frontend, so only Nginx's port needs to be exposed to the host.
+
+### Production (`go2url.xyz`)
+
+```bash
+cp .env.example .env   # fill in JWT_SECRET and any overrides
+docker compose up -d --build
+```
+
+Serves on `NGINX_PORT` (default `80`).
+
+### Development (`dev.go2url.xyz`)
+
+A fully separate stack — its own containers, network, volume, and Postgres database — so it can run alongside production on the same server without collisions.
+
+```bash
+cp .env.dev.example .env.dev   # fill in DEV_JWT_SECRET and any overrides
+docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
+```
+
+Serves on `DEV_NGINX_PORT` (default `8080`). Point `dev.go2url.xyz`'s DNS/proxy (e.g. Cloudflare) at this port on the server, the same way `go2url.xyz` points at the production stack's `NGINX_PORT`.
+
+To rebuild after pulling new code (both `NEXT_PUBLIC_API_URL` and any backend changes require a rebuild, not just a restart):
+
+```bash
+docker compose --env-file .env.dev -f docker-compose.dev.yml build --no-cache
+docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
+```
+
+To tear the dev stack down (including its database volume):
+
+```bash
+docker compose --env-file .env.dev -f docker-compose.dev.yml down -v
+```
 
 ## Database Models
 
