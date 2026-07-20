@@ -3,7 +3,7 @@ name: Deploy Development
 on:
   push:
     branches:
-      - dev
+      - development
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
