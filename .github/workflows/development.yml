@@ -6,7 +6,8 @@ on:
       - development
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository }}
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}-backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}-frontend
 
 jobs:
   deploy:
@@ -27,17 +28,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Docker Image
+      - name: Build backend Docker image
         run: |
-          docker build \
-            -t $IMAGE_NAME:dev \
-            -t $IMAGE_NAME:${{ github.sha }} \
-            .
+          docker build ./backend --file backend/Dockerfile \
+            -t $BACKEND_IMAGE:dev \
+            -t $BACKEND_IMAGE:${{ github.sha }}
 
-      - name: Push Docker Image
+      - name: Build frontend Docker image
         run: |
-          docker push $IMAGE_NAME:dev
-          docker push $IMAGE_NAME:${{ github.sha }}
+          docker build ./frontend --file frontend/Dockerfile \
+            --build-arg NEXT_PUBLIC_API_URL=${{ vars.DEV_NEXT_PUBLIC_API_URL }} \
+            -t $FRONTEND_IMAGE:dev \
+            -t $FRONTEND_IMAGE:${{ github.sha }}
+
+      - name: Push backend Docker image
+        run: |
+          docker push $BACKEND_IMAGE:dev
+          docker push $BACKEND_IMAGE:${{ github.sha }}
+
+      - name: Push frontend Docker image
+        run: |
+          docker push $FRONTEND_IMAGE:dev
+          docker push $FRONTEND_IMAGE:${{ github.sha }}
 
       - name: Deploy to Linode
         uses: appleboy/ssh-action@v1.2.0
@@ -52,8 +64,8 @@ jobs:
               -u ${{ github.actor }} \
               -p ${{ secrets.GHCR_PAT }}
 
-            docker compose -f docker-compose.dev.yml pull
+            docker compose --env-file .env.dev -f docker-compose.dev.yml pull
 
-            docker compose -f docker-compose.dev.yml up -d
+            docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
 
             docker image prune -f
