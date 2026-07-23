@@ -36,9 +36,10 @@ jobs:
             --config p/security-audit \
             --sarif \
             --output semgrep.sarif \
+            .
 
       
-      - name: Upload Semgrep Report
+      - name: Upload Trivy Filesystem Report
         uses: actions/upload-artifact@v4
         with:
           name: semgrep-report
@@ -244,3 +245,21 @@ jobs:
         with:
           name: frontend-sbom
           path: frontend-sbom.json
+      
+      - name: Create Pull Request to Main
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: development
+          base: main
+          title: "Promote development to production"
+          body: |
+            Automated pull request.
+            Development deployment succeeded.
+            ✔ Gitleaks
+            ✔ Semgrep
+            ✔ Trivy
+            ✔ Hadolint
+            ✔ Health Check
+            ✔ ZAP
+            ✔ SBOM
