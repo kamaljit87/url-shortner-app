@@ -170,5 +170,5 @@ jobs:
 
       - name: Health Check
         run: |
-          curl --fail https://dev.go2url.xyz/api/health
+          curl --fail https://dev.go2url.xyz
 
