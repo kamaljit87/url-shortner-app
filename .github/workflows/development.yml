@@ -44,6 +44,11 @@ jobs:
           name: semgrep-report
           path: semgrep.sarif
 
+      - name: Upload Semgrep SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+
       - name: Run Trivy Filesystem Scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -59,6 +64,11 @@ jobs:
           name: trivy-report
           path: trivy-fs.sarif 
 
+      - name: Upload trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+
       - name: Scan Backend Dockerfile
         run: |
           docker run --rm \
@@ -72,6 +82,11 @@ jobs:
         with:
           name: backend-scan-report
           path: backend-hadolint.sarif
+
+      - name: Upload Backend Dockerfile scan SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: backend-hadolint.sarif
 
       - name: Scan Frontend Dockerfile
         run: |
@@ -87,6 +102,10 @@ jobs:
           name: Frontend-scan-report
           path: frontend-hadolint.sarif
 
+      - name: Upload frontend Dockerfile scan SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: frontend-hadolint.sarif
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -115,6 +134,11 @@ jobs:
           name: backend-image-report
           path: backend-image.sarif
 
+      - name: Upload Backend Image scan SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: backend-image.sarif
+
       - name: Build frontend Docker image
         run: |
           docker build ./frontend --file frontend/Dockerfile \
@@ -135,6 +159,11 @@ jobs:
         with:
           name: frontend-image-report
           path: frontend-image.sarif
+
+      - name: Upload Frontend Image scan SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: frontend-image.sarif
 
       - name: Push backend Docker image
         run: |
@@ -177,3 +206,34 @@ jobs:
         with:
           target: "https://dev.go2url.xyz"
 
+      - name: Upload ZAP Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: report_html.html
+      
+      - name: Generate Backend SBOM
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+          format: cyclonedx
+          output: backend-sbom.json
+
+      - name: Upload Backend SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-sbom
+          path: backend-sbom.json
+      
+      - name: Generate Frontend SBOM
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+          format: cyclonedx
+          output: frontend-sbom.json
+
+      - name: Upload Frontend SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-sbom
+          path: frontend-sbom.json
