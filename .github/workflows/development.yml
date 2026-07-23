@@ -246,20 +246,13 @@ jobs:
           name: frontend-sbom
           path: frontend-sbom.json
       
-      - name: Create Pull Request to Main
-        uses: peter-evans/create-pull-request@v7
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          branch: development
-          base: main
-          title: "Promote development to production"
-          body: |
-            Automated pull request.
-            Development deployment succeeded.
-            ✔ Gitleaks
-            ✔ Semgrep
-            ✔ Trivy
-            ✔ Hadolint
-            ✔ Health Check
-            ✔ ZAP
-            ✔ SBOM
+      - name: Create PR to Main
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+          --base main \
+          --head development \
+          --title "Promote development to production" \
+          --body "Development pipeline completed successfully."
