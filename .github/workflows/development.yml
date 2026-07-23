@@ -101,12 +101,40 @@ jobs:
             -t $BACKEND_IMAGE:dev \
             -t $BACKEND_IMAGE:${{ github.sha }}
 
+      - name: Scan Backend Image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+          format: sarif
+          output: backend-image.sarif
+          severity: HIGH,CRITICAL
+          
+      - name: Upload Backend Image Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-image-report
+          path: backend-image.sarif
+
       - name: Build frontend Docker image
         run: |
           docker build ./frontend --file frontend/Dockerfile \
             --build-arg NEXT_PUBLIC_API_URL=${{ vars.DEV_NEXT_PUBLIC_API_URL }} \
             -t $FRONTEND_IMAGE:dev \
             -t $FRONTEND_IMAGE:${{ github.sha }}
+
+      - name: Scan Frontend Image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+          format: sarif
+          output: frontend-image.sarif
+          severity: HIGH,CRITICAL
+
+      - name: Upload Frontend Image Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-image-report
+          path: frontend-image.sarif
 
       - name: Push backend Docker image
         run: |
