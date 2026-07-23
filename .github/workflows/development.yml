@@ -164,3 +164,11 @@ jobs:
             docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
 
             docker image prune -f
+
+      - name: Wait for application
+        run: sleep 20
+
+      - name: Health Check
+        run: |
+          curl --fail https://dev.go2url.xyz/api/health
+
