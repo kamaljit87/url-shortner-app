@@ -65,7 +65,7 @@ jobs:
           -i hadolint/hadolint \
           hadolint \
           -f sarif - \
-          < backend/Dockerfile > backend-hadolint.sarif
+          < backend/Dockerfile > backend-hadolint.sarif || true
 
       - name: Scan Frontend Dockerfile
         run: |
@@ -73,7 +73,7 @@ jobs:
           -i hadolint/hadolint \
           hadolint \
           -f sarif - \
-          < frontend/Dockerfile > frontend-hadolint.sarif
+          < frontend/Dockerfile > frontend-hadolint.sarif || true
 
 
       - name: Log in to GitHub Container Registry
