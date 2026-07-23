@@ -1,0 +1,260 @@
+name: Deploy Development
+
+on:
+  push:
+    branches:
+      - development
+
+env:
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}-backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}-frontend
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      security-events: write
+      contents: read
+      packages: write
+      pull-requests: write
+
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+            fetch-depth: 0
+      
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Semgrep
+        run: |
+          python -m pip install semgrep
+          semgrep scan \
+            --config p/security-audit \
+            --sarif \
+            --output semgrep.sarif \
+            .
+
+      
+      - name: Upload Trivy Filesystem Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-report
+          path: semgrep.sarif
+
+      - name: Upload Semgrep SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+      - name: Run Trivy Filesystem Scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          severity: HIGH,CRITICAL
+
+      - name: Upload Semgrep Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report
+          path: trivy-fs.sarif 
+
+      - name: Upload trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+      - name: Scan Backend Dockerfile
+        run: |
+          docker run --rm \
+          -i hadolint/hadolint \
+          hadolint \
+          -f sarif - \
+          < backend/Dockerfile > backend-hadolint.sarif || true
+
+      - name: Backend Dockerfile scan report
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-scan-report
+          path: backend-hadolint.sarif
+
+      - name: Upload Backend Dockerfile scan SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: backend-hadolint.sarif
+          category: hadolint-backend
+
+      - name: Scan Frontend Dockerfile
+        run: |
+          docker run --rm \
+          -i hadolint/hadolint \
+          hadolint \
+          -f sarif - \
+          < frontend/Dockerfile > frontend-hadolint.sarif || true
+
+      - name: Frontend Dockerfile scan report
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frontend-scan-report
+          path: frontend-hadolint.sarif
+
+      - name: Upload frontend Dockerfile scan SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: frontend-hadolint.sarif
+          category: hadolint-frontend
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build backend Docker image
+        run: |
+          docker build ./backend --file backend/Dockerfile \
+            -t $BACKEND_IMAGE:dev \
+            -t $BACKEND_IMAGE:${{ github.sha }}
+
+      - name: Scan Backend Image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+          format: sarif
+          output: backend-image.sarif
+          severity: HIGH,CRITICAL
+          
+      - name: Upload Backend Image Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-image-report
+          path: backend-image.sarif
+
+      - name: Upload Backend Image scan SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: backend-image.sarif
+          category: trivy-image-backend
+
+      - name: Build frontend Docker image
+        run: |
+          docker build ./frontend --file frontend/Dockerfile \
+            --build-arg NEXT_PUBLIC_API_URL=${{ vars.DEV_NEXT_PUBLIC_API_URL }} \
+            -t $FRONTEND_IMAGE:dev \
+            -t $FRONTEND_IMAGE:${{ github.sha }}
+
+      - name: Scan Frontend Image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+          format: sarif
+          output: frontend-image.sarif
+          severity: HIGH,CRITICAL
+
+      - name: Upload Frontend Image Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-image-report
+          path: frontend-image.sarif
+
+      - name: Upload Frontend Image scan SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: frontend-image.sarif
+          category: trivy-image-frontend
+
+      - name: Push backend Docker image
+        run: |
+          docker push $BACKEND_IMAGE:dev
+          docker push $BACKEND_IMAGE:${{ github.sha }}
+
+      - name: Push frontend Docker image
+        run: |
+          docker push $FRONTEND_IMAGE:dev
+          docker push $FRONTEND_IMAGE:${{ github.sha }}
+
+      - name: Deploy to Linode
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.LINODE_HOST }}
+          username: ${{ secrets.LINODE_USER }}
+          key: ${{ secrets.LINODE_SSH_KEY }}
+          script: |
+            cd /root/url-shortner-app-dev
+
+            docker login ghcr.io \
+              -u ${{ github.actor }} \
+              -p ${{ secrets.GHCR_PAT }}
+
+            docker compose --env-file .env.dev -f docker-compose.dev.yml pull
+
+            docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
+
+            docker image prune -f
+
+      - name: Wait for application
+        run: sleep 20
+
+      - name: Health Check
+        run: |
+          curl --fail https://dev.go2url.xyz
+
+      - name: OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: "https://dev.go2url.xyz"
+          allow_issue_writing: false
+
+      - name: Upload ZAP Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: report_html.html
+      
+      - name: Generate Backend SBOM
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+          format: cyclonedx
+          output: backend-sbom.json
+
+      - name: Upload Backend SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-sbom
+          path: backend-sbom.json
+      
+      - name: Generate Frontend SBOM
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+          format: cyclonedx
+          output: frontend-sbom.json
+
+      - name: Upload Frontend SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-sbom
+          path: frontend-sbom.json
+      
+      - name: Create PR to Main
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+          --base main \
+          --head development \
+          --title "Promote development to production" \
+          --body "Development pipeline completed successfully."
