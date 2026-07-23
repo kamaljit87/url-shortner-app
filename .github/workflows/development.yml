@@ -59,12 +59,22 @@ jobs:
           name: trivy-report
           path: trivy-fs.sarif 
 
-      - name: Dockerfile scan  
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: Dockerfile
-          recursive: true
-          no-fail: true
+      - name: Scan Backend Dockerfile
+        run: |
+          docker run --rm \
+          -i hadolint/hadolint \
+          hadolint \
+          -f sarif - \
+          < backend/Dockerfile > backend-hadolint.sarif
+
+      - name: Scan Frontend Dockerfile
+        run: |
+          docker run --rm \
+          -i hadolint/hadolint \
+          hadolint \
+          -f sarif - \
+          < frontend/Dockerfile > frontend-hadolint.sarif
+
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
