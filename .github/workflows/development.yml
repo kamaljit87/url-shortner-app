@@ -67,6 +67,12 @@ jobs:
           -f sarif - \
           < backend/Dockerfile > backend-hadolint.sarif || true
 
+      - name: Backend Dockerfile scan report
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-scan-report
+          path: backend-hadolint.sarif
+
       - name: Scan Frontend Dockerfile
         run: |
           docker run --rm \
@@ -74,6 +80,12 @@ jobs:
           hadolint \
           -f sarif - \
           < frontend/Dockerfile > frontend-hadolint.sarif || true
+
+      - name: Frontend Dockerfile scan report
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frontend-scan-report
+          path: frontend-hadolint.sarif
 
 
       - name: Log in to GitHub Container Registry
