@@ -192,6 +192,7 @@ jobs:
           key: ${{ secrets.LINODE_SSH_KEY }}
           script: |
             cd /root/url-shortner-app-dev
+            git pull
 
             if [ ! -f docker-compose.dev.yml ] || [ ! -f .env.dev ]; then
               echo "docker-compose.dev.yml or .env.dev missing in $(pwd) — refusing to deploy." >&2
