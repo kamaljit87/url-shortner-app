@@ -19,8 +19,7 @@ services:
       retries: 10
 
   backend:
-    build:
-      context: ./backend
+    image: ${BACKEND_IMAGE:-ghcr.io/kamaljit87/url-shortner-app-backend:prod}
     restart: unless-stopped
     depends_on:
       db:
@@ -36,10 +35,7 @@ services:
       - "4000"
 
   frontend:
-    build:
-      context: ./frontend
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://go2url.xyz}
+    image: ${FRONTEND_IMAGE:-ghcr.io/kamaljit87/url-shortner-app-frontend:prod}
     restart: unless-stopped
     depends_on:
       - backend

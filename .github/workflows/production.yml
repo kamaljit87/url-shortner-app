@@ -14,22 +14,20 @@ jobs:
       github.event.pull_request.merged == true &&
       github.event.pull_request.base.ref == 'main' &&
       github.event.pull_request.head.ref == 'development'
-      
+
     runs-on: ubuntu-latest
 
     permissions:
       security-events: write
       contents: read
       packages: write
-      pull-requests: write
-
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
             fetch-depth: 0
-      
+
       - name: Run Gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
@@ -44,8 +42,7 @@ jobs:
             --output semgrep.sarif \
             .
 
-      
-      - name: Upload Trivy Filesystem Report
+      - name: Upload Semgrep Report
         uses: actions/upload-artifact@v4
         with:
           name: semgrep-report
@@ -66,11 +63,11 @@ jobs:
           output: trivy-fs.sarif
           severity: HIGH,CRITICAL
 
-      - name: Upload Semgrep Report
+      - name: Upload Trivy Filesystem Report
         uses: actions/upload-artifact@v4
         with:
           name: trivy-report
-          path: trivy-fs.sarif 
+          path: trivy-fs.sarif
 
       - name: Upload trivy SARIF
         uses: github/codeql-action/upload-sarif@v3
@@ -83,7 +80,9 @@ jobs:
           docker run --rm \
           -i hadolint/hadolint \
           hadolint \
-          -f sarif - \
+          -f sarif \
+          --failure-threshold warning \
+          - \
           < backend/Dockerfile > backend-hadolint.sarif || true
 
       - name: Backend Dockerfile scan report
@@ -103,7 +102,9 @@ jobs:
           docker run --rm \
           -i hadolint/hadolint \
           hadolint \
-          -f sarif - \
+          -f sarif \
+          --failure-threshold warning \
+          - \
           < frontend/Dockerfile > frontend-hadolint.sarif || true
 
       - name: Frontend Dockerfile scan report
@@ -128,7 +129,7 @@ jobs:
       - name: Build backend Docker image
         run: |
           docker build ./backend --file backend/Dockerfile \
-            -t $BACKEND_IMAGE:dev \
+            -t $BACKEND_IMAGE:prod \
             -t $BACKEND_IMAGE:${{ github.sha }}
 
       - name: Scan Backend Image
@@ -138,7 +139,7 @@ jobs:
           format: sarif
           output: backend-image.sarif
           severity: HIGH,CRITICAL
-          
+
       - name: Upload Backend Image Report
         uses: actions/upload-artifact@v4
         with:
@@ -154,8 +155,8 @@ jobs:
       - name: Build frontend Docker image
         run: |
           docker build ./frontend --file frontend/Dockerfile \
-            --build-arg NEXT_PUBLIC_API_URL=${{ vars.DEV_NEXT_PUBLIC_API_URL }} \
-            -t $FRONTEND_IMAGE:dev \
+            --build-arg NEXT_PUBLIC_API_URL=${{ vars.PROD_NEXT_PUBLIC_API_URL }} \
+            -t $FRONTEND_IMAGE:prod \
             -t $FRONTEND_IMAGE:${{ github.sha }}
 
       - name: Scan Frontend Image
@@ -180,44 +181,86 @@ jobs:
 
       - name: Push backend Docker image
         run: |
-          docker push $BACKEND_IMAGE:dev
+          docker push $BACKEND_IMAGE:prod
           docker push $BACKEND_IMAGE:${{ github.sha }}
 
       - name: Push frontend Docker image
         run: |
-          docker push $FRONTEND_IMAGE:dev
+          docker push $FRONTEND_IMAGE:prod
           docker push $FRONTEND_IMAGE:${{ github.sha }}
 
-      - name: Deploy to Linode
+      # --- Pull Tested Images ---
+      # Images above were just built, scanned, and pushed under this exact
+      # commit SHA. This step is the handoff point: the Linode host pulls
+      # those SHA-tagged images from GHCR rather than trusting the ones it
+      # already has running.
+      - name: Pull Tested Images
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.LINODE_HOST }}
           username: ${{ secrets.LINODE_USER }}
           key: ${{ secrets.LINODE_SSH_KEY }}
           script: |
-            cd /root/url-shortner-app-dev
+            cd /root/url-shortner-app-prod
 
             docker login ghcr.io \
               -u ${{ github.actor }} \
               -p ${{ secrets.GHCR_PAT }}
 
-            docker compose --env-file .env.dev -f docker-compose.dev.yml pull
+            record_prev() {
+              local service="$1" outfile="$2"
+              local cid
+              cid=$(docker compose --env-file .env -f docker-compose.yml images -q "$service")
+              if [ -z "$cid" ]; then
+                : > "$outfile"
+                return
+              fi
+              docker inspect --format '{{index .RepoDigests 0}}' "$cid" 2>/dev/null > "$outfile" || : > "$outfile"
+            }
+            record_prev backend backend.prev
+            record_prev frontend frontend.prev
 
-            docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
+            export BACKEND_IMAGE=${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+            export FRONTEND_IMAGE=${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+            docker compose --env-file .env -f docker-compose.yml pull
+
+      # --- Deploy Production ---
+      - name: Deploy Production
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.LINODE_HOST }}
+          username: ${{ secrets.LINODE_USER }}
+          key: ${{ secrets.LINODE_SSH_KEY }}
+          script: |
+            cd /root/url-shortner-app-prod
+
+            export BACKEND_IMAGE=${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+            export FRONTEND_IMAGE=${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+
+            docker compose --env-file .env -f docker-compose.yml up -d
 
             docker image prune -f
 
+      # --- Health Check ---
       - name: Wait for application
         run: sleep 20
 
       - name: Health Check
+        id: health_check
+        run: curl --fail https://go2url.xyz
+
+      # --- Smoke Tests ---
+      - name: Smoke Tests
+        id: smoke_tests
         run: |
-          curl --fail https://dev.go2url.xyz
+          curl --fail https://go2url.xyz
+          curl --fail https://go2url.xyz/health
+          curl --fail https://go2url.xyz/login
 
       - name: OWASP ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.14.0
         with:
-          target: "https://dev.go2url.xyz"
+          target: "https://go2url.xyz"
           allow_issue_writing: false
 
       - name: Upload ZAP Report
@@ -225,7 +268,32 @@ jobs:
         with:
           name: zap-report
           path: report_html.html
-      
+
+      # --- Rollback (optional) ---
+      - name: Rollback on failure
+        if: failure()
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.LINODE_HOST }}
+          username: ${{ secrets.LINODE_USER }}
+          key: ${{ secrets.LINODE_SSH_KEY }}
+          script: |
+            cd /root/url-shortner-app-prod
+
+            BACKEND_PREV=$(cat backend.prev 2>/dev/null || true)
+            FRONTEND_PREV=$(cat frontend.prev 2>/dev/null || true)
+
+            if [ -z "$BACKEND_PREV" ] || [ -z "$FRONTEND_PREV" ]; then
+              echo "No previous image recorded, cannot roll back automatically." >&2
+              exit 1
+            fi
+
+            export BACKEND_IMAGE=$BACKEND_PREV
+            export FRONTEND_IMAGE=$FRONTEND_PREV
+
+            docker compose --env-file .env -f docker-compose.yml pull
+            docker compose --env-file .env -f docker-compose.yml up -d
+
       - name: Generate Backend SBOM
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -238,7 +306,7 @@ jobs:
         with:
           name: backend-sbom
           path: backend-sbom.json
-      
+
       - name: Generate Frontend SBOM
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -251,14 +319,3 @@ jobs:
         with:
           name: frontend-sbom
           path: frontend-sbom.json
-      
-      - name: Create PR to Main
-        if: success()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh pr create \
-          --base main \
-          --head development \
-          --title "Promote development to production" \
-          --body "Development pipeline completed successfully."
