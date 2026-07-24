@@ -17,6 +17,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - dev
 
   backend:
     image: ${DEV_BACKEND_IMAGE:-ghcr.io/kamaljit87/url-shortner-app-backend:dev}
@@ -33,6 +35,8 @@ services:
       FRONTEND_URL: ${DEV_FRONTEND_URL:-https://dev.go2url.xyz}
     expose:
       - "4000"
+    networks:
+      - dev
 
   frontend:
     image: ${DEV_FRONTEND_IMAGE:-ghcr.io/kamaljit87/url-shortner-app-frontend:dev}
@@ -41,6 +45,8 @@ services:
       - backend
     expose:
       - "3000"
+    networks:
+      - dev
 
   nginx:
     image: nginx:1.27-alpine
@@ -52,6 +58,12 @@ services:
       - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
     ports:
       - "${DEV_NGINX_PORT:-8080}:80"
+    networks:
+      - dev
 
 volumes:
   dev_db_data:
+
+networks:
+  dev:
+    name: url-shortener-dev-net
