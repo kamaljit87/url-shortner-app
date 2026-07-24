@@ -60,7 +60,7 @@ jobs:
           username: ${{ secrets.LINODE_USER }}
           key: ${{ secrets.LINODE_SSH_KEY }}
           script: |
-            cd /root/url-shortner-app-prod
+            cd /root/url-shortner-app
 
             docker login ghcr.io \
               -u ${{ github.actor }} \
@@ -91,7 +91,7 @@ jobs:
           username: ${{ secrets.LINODE_USER }}
           key: ${{ secrets.LINODE_SSH_KEY }}
           script: |
-            cd /root/url-shortner-app-prod
+            cd /root/url-shortner-app
 
             export BACKEND_IMAGE=${{ env.BACKEND_IMAGE }}:${{ github.sha }}
             export FRONTEND_IMAGE=${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
