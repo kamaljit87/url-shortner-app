@@ -1,7 +1,10 @@
+'use client';
+
 import Link from 'next/link';
 import { ArrowRight, BarChart3, Link2, ShieldCheck, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { useAuth } from '@/context/AuthContext';
 
 const features = [
   {
@@ -27,6 +30,8 @@ const features = [
 ];
 
 export default function Home() {
+  const { user } = useAuth();
+
   return (
     <main className="flex flex-1 flex-col">
       <section className="relative overflow-hidden px-4 py-24 sm:px-6 sm:py-32">
@@ -48,17 +53,28 @@ export default function Home() {
             creation dates, and last-accessed times for every link you make.
           </p>
           <div className="animate-fade-in mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Link href="/register" className="w-full sm:w-auto">
-              <Button size="lg" className="w-full sm:w-auto">
-                Get started free
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
-            <Link href="/login" className="w-full sm:w-auto">
-              <Button variant="secondary" size="lg" className="w-full sm:w-auto">
-                Log in
-              </Button>
-            </Link>
+            {user ? (
+              <Link href="/dashboard" className="w-full sm:w-auto">
+                <Button size="lg" className="w-full sm:w-auto">
+                  Go to dashboard
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
+            ) : (
+              <>
+                <Link href="/register" className="w-full sm:w-auto">
+                  <Button size="lg" className="w-full sm:w-auto">
+                    Get started free
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </Link>
+                <Link href="/login" className="w-full sm:w-auto">
+                  <Button variant="secondary" size="lg" className="w-full sm:w-auto">
+                    Log in
+                  </Button>
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </section>
