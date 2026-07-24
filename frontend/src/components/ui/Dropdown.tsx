@@ -9,6 +9,7 @@ import {
   ReactNode,
   ButtonHTMLAttributes,
 } from 'react';
+import Link from 'next/link';
 import { cn } from '@/lib/cn';
 
 interface DropdownContextValue {
@@ -108,16 +109,32 @@ export function DropdownMenu({
 
 export function DropdownItem({
   children,
+  href,
   onClick,
   className,
   danger,
 }: {
   children: ReactNode;
+  href?: string;
   onClick?: () => void;
   className?: string;
   danger?: boolean;
 }) {
   const { setOpen } = useDropdown();
+
+  const itemClassName = cn(
+    'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors',
+    danger ? 'text-danger hover:bg-danger-bg' : 'text-foreground hover:bg-surface-muted',
+    className,
+  );
+
+  if (href) {
+    return (
+      <Link role="menuitem" href={href} onClick={() => setOpen(false)} className={itemClassName}>
+        {children}
+      </Link>
+    );
+  }
 
   return (
     <button
@@ -126,13 +143,7 @@ export function DropdownItem({
         onClick?.();
         setOpen(false);
       }}
-      className={cn(
-        'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors',
-        danger
-          ? 'text-danger hover:bg-danger-bg'
-          : 'text-foreground hover:bg-surface-muted',
-        className,
-      )}
+      className={itemClassName}
     >
       {children}
     </button>

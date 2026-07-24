@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Link2, LogOut, User } from 'lucide-react';
+import { LayoutDashboard, Link2, LogOut, User } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { ThemeToggle } from './ThemeToggle';
 import { Button } from './ui/Button';
@@ -42,6 +42,10 @@ export function Navbar() {
                   <p className="text-xs text-muted">Signed in</p>
                 </div>
                 <DropdownSeparator />
+                <DropdownItem href="/dashboard">
+                  <LayoutDashboard className="h-4 w-4" />
+                  Dashboard
+                </DropdownItem>
                 <DropdownItem danger onClick={() => logout()}>
                   <LogOut className="h-4 w-4" />
                   Log out
