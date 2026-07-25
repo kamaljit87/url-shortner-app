@@ -79,8 +79,11 @@ jobs:
           docker run --rm \
           -i hadolint/hadolint \
           hadolint \
-          -f sarif - \
-          < backend/Dockerfile > backend-hadolint.sarif || true
+          -f sarif \
+          --failure-threshold warning \
+          - \
+          < backend/Dockerfile > backend-hadolint.sarif
+          python3 -c "import json; json.load(open('backend-hadolint.sarif'))"
 
       - name: Backend Dockerfile scan report
         uses: actions/upload-artifact@v4
@@ -99,8 +102,11 @@ jobs:
           docker run --rm \
           -i hadolint/hadolint \
           hadolint \
-          -f sarif - \
-          < frontend/Dockerfile > frontend-hadolint.sarif || true
+          -f sarif \
+          --failure-threshold warning \
+          - \
+          < frontend/Dockerfile > frontend-hadolint.sarif
+          python3 -c "import json; json.load(open('frontend-hadolint.sarif'))"
 
       - name: Frontend Dockerfile scan report
         uses: actions/upload-artifact@v4
