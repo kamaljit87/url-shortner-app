@@ -1,0 +1,156 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types:
+      - closed
+env:
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}-backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}-frontend
+
+jobs:
+  deploy:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.merged == true &&
+        github.event.pull_request.base.ref == 'main' &&
+        github.event.pull_request.head.ref == 'development'
+      )
+    runs-on: ubuntu-latest
+
+    permissions:
+      security-events: write
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+            fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+     
+
+      # --- Pull Tested Images ---
+      # Images above were just built, scanned, and pushed under this exact
+      # commit SHA. This step is the handoff point: the Linode host pulls
+      # those SHA-tagged images from GHCR rather than trusting the ones it
+      # already has running.
+      - name: Pull Tested Images
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.LINODE_HOST }}
+          username: ${{ secrets.LINODE_USER }}
+          key: ${{ secrets.LINODE_SSH_KEY }}
+          script: |
+            cd /root/url-shortner-app
+
+            docker login ghcr.io \
+              -u ${{ github.actor }} \
+              -p ${{ secrets.GHCR_PAT }}
+
+            record_prev() {
+              local service="$1" outfile="$2"
+              local cid
+              cid=$(docker compose --env-file .env -f docker-compose.yml images -q "$service")
+              if [ -z "$cid" ]; then
+                : > "$outfile"
+                return
+              fi
+              docker inspect --format '{{index .RepoDigests 0}}' "$cid" 2>/dev/null > "$outfile" || : > "$outfile"
+            }
+            record_prev backend backend.prev
+            record_prev frontend frontend.prev
+
+            export BACKEND_IMAGE=${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+            export FRONTEND_IMAGE=${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+            docker compose --env-file .env -f docker-compose.yml pull
+
+      # --- Deploy Production ---
+      - name: Deploy Production
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.LINODE_HOST }}
+          username: ${{ secrets.LINODE_USER }}
+          key: ${{ secrets.LINODE_SSH_KEY }}
+          script: |
+            cd /root/url-shortner-app
+
+            export BACKEND_IMAGE=${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+            export FRONTEND_IMAGE=${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+
+            docker compose --env-file .env -f docker-compose.yml up -d
+
+            docker image prune -f
+
+      # --- Health Check ---
+      - name: Wait for application
+        run: sleep 20
+
+      - name: Health Check
+        id: health_check
+        run: curl --fail https://go2url.xyz
+
+      # --- Smoke Tests ---
+      - name: Smoke Tests
+        id: smoke_tests
+        run: |
+          curl --fail https://go2url.xyz
+          curl --fail https://go2url.xyz/health
+          curl --fail https://go2url.xyz/login
+
+      - name: OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: "https://go2url.xyz"
+          allow_issue_writing: false
+
+      - name: Upload ZAP Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: report_html.html
+
+      # --- Rollback (optional) ---
+      - name: Rollback on failure
+        if: failure()
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.LINODE_HOST }}
+          username: ${{ secrets.LINODE_USER }}
+          key: ${{ secrets.LINODE_SSH_KEY }}
+          script: |
+            cd /root/url-shortner-app
+
+            BACKEND_PREV=$(cat backend.prev 2>/dev/null || true)
+            FRONTEND_PREV=$(cat frontend.prev 2>/dev/null || true)
+
+            if [ -z "$BACKEND_PREV" ] || [ -z "$FRONTEND_PREV" ]; then
+              echo "No previous image recorded, cannot roll back automatically." >&2
+              exit 1
+            fi
+
+            export BACKEND_IMAGE=$BACKEND_PREV
+            export FRONTEND_IMAGE=$FRONTEND_PREV
+
+            docker compose --env-file .env -f docker-compose.yml pull
+            docker compose --env-file .env -f docker-compose.yml up -d
+
+ 
