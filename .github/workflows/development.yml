@@ -259,6 +259,22 @@ jobs:
         with:
           name: frontend-sbom
           path: frontend-sbom.json
+
+      - name: Close Existing PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=$(gh pr list \
+          --base main \
+          --head development \
+          --state open \
+          --json number \
+          --jq '.[0].number')
+
+          if [ -n "$PR_NUMBER" ]; then
+          echo "Closing PR #$PR_NUMBER"
+          gh pr close "$PR_NUMBER"
+          fi
       
       - name: Create PR to Main
         if: success()
