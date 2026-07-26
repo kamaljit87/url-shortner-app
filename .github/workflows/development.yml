@@ -198,23 +198,31 @@ jobs:
           username: ${{ secrets.LINODE_USER }}
           key: ${{ secrets.LINODE_SSH_KEY }}
           script: |
+            set -euo pipefail
             cd /root/url-shortner-app-dev
             git pull
-
             if [ ! -f docker-compose.dev.yml ] || [ ! -f .env.dev ]; then
-              echo "docker-compose.dev.yml or .env.dev missing in $(pwd) — refusing to deploy." >&2
-              exit 1
+            echo "docker-compose.dev.yml or .env.dev missing in $(pwd)"
+            exit 1
             fi
 
-            docker login ghcr.io \
-              -u ${{ github.actor }} \
-              -p ${{ secrets.GHCR_PAT }}
+            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io \
+            -u "${{ github.actor }}" \
+            --password-stdin
+
+            export DEV_BACKEND_IMAGE=${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+            export DEV_FRONTEND_IMAGE=${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+
+            echo "Backend image: $DEV_BACKEND_IMAGE"
+            echo "Frontend image: $DEV_FRONTEND_IMAGE"
+
+            docker compose --env-file .env.dev -f docker-compose.dev.yml config
 
             docker compose --env-file .env.dev -f docker-compose.dev.yml pull
 
             docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --remove-orphans
 
-            docker image prune -f
+            docker image prune -f 
 
       - name: Wait for application
         run: sleep 20
