@@ -163,16 +163,92 @@ Each workspace also has a `format` script that runs Prettier.
 
 ## Docker Deployment
 
-The repository includes Docker Compose configurations for running the full stack (Postgres, backend, frontend, and an Nginx reverse proxy) behind a single public entrypoint. Nginx routes `/api/*` and short-code redirects to the backend and everything else to the Next.js frontend, so only Nginx's port needs to be exposed to the host.
+The repository runs as **three independent Docker Compose projects** on the host:
+
+| Project | File | Purpose |
+|---|---|---|
+| Reverse proxy | `docker-compose.proxy.yml` | Single `nginx:alpine` container. The only thing that publishes host ports (`80`/`443`). Hostname-routes to whichever app stacks are running. |
+| Production app | `docker-compose.prod.yml` | Postgres, backend, frontend for `go2url.xyz`. No host ports published — reachable only through the proxy. |
+| Development app | `docker-compose.dev.yml` | Postgres, backend, frontend for `dev.go2url.xyz`. Publishes its own host ports (distinct from prod) *and* joins the proxy network, so it's reachable both directly and via hostname. |
+
+This split means the proxy is upgraded, restarted, or re-certified independently of either app stack, and additional applications can be added later by giving them their own compose project and a `conf.d/*.conf` entry — without touching the proxy container itself.
+
+### Networking
+
+Each app stack defines two networks:
+
+- **`app-network`** — private per-stack network (`url-shortener-prod-net` / `url-shortener-dev-net`). The database only ever joins this one, so it is never reachable from the proxy or from the other stack.
+- **`proxy-network`** — a single external network named `proxy-network`, shared by the proxy container and every app's frontend/backend. This is how Nginx reaches `frontend`/`backend` (prod) and `dev-frontend`/`dev-backend` (dev) by container name without any host ports being involved.
+
+```
+                        ┌─────────────────────────┐
+                        │   proxy-network (ext)    │
+                        │                          │
+   Internet ──80/443──▶ │   nginx (reverse-proxy)  │
+                        │                          │
+                        └────────┬────────┬────────┘
+                                 │        │
+                    ┌────────────┘        └────────────┐
+                    ▼                                   ▼
+        ┌───────────────────────┐          ┌───────────────────────────┐
+        │  app-network (prod)   │          │  app-network (dev)         │
+        │                       │          │                             │
+        │  frontend ─ backend   │          │  dev-frontend ─ dev-backend │
+        │       │                │          │        │                    │
+        │       ▼                │          │        ▼                    │
+        │      db (prod)         │          │      db (dev)               │
+        │  (no proxy-network)    │          │  (no proxy-network)         │
+        └───────────────────────┘          └───────────────────────────┘
+```
+
+The `db` service in both stacks has **no** `proxy-network` membership and publishes no host port in production (dev publishes one for local psql/GUI access only) — it is unreachable from the internet or from the reverse proxy in either environment.
+
+### Request flow
+
+```
+Browser
+  │  https://go2url.xyz/...        https://dev.go2url.xyz/...
+  ▼
+Cloudflare (TLS termination)
+  │  plain HTTP
+  ▼
+nginx (docker-compose.proxy.yml), listening on :80
+  │
+  ├─ Host: go2url.xyz      → conf.d/production.conf  ──▶ frontend:3000 / backend:4000
+  └─ Host: dev.go2url.xyz  → conf.d/development.conf  ──▶ dev-frontend:3000 / dev-backend:4000
+
+Within each server block:
+  /api/*                       → backend upstream
+  = /health                    → backend upstream
+  /<shortcode> (not a known    → backend upstream (redirect)
+   frontend route)
+  everything else              → frontend upstream (Next.js)
+```
+
+### One-time setup: create the shared network and start the proxy
+
+```bash
+docker network create proxy-network
+docker compose -f docker-compose.proxy.yml up -d
+```
+
+The proxy only needs to be started once; it stays up across app deploys/restarts. Validate config changes before applying them:
+
+```bash
+docker compose -f docker-compose.proxy.yml config    # validate compose syntax
+docker compose -f docker-compose.proxy.yml exec nginx nginx -t   # validate nginx syntax (running container)
+```
+
+`proxy/conf.d/*.conf` use `resolver 127.0.0.11` (Docker's embedded DNS) with variables in `proxy_pass` rather than static `upstream {}` blocks, so `nginx -t` and container startup succeed even if the app stacks aren't running yet — nginx resolves `frontend`/`backend` container names lazily, per-request, instead of failing to start when a hostname can't be resolved at boot.
 
 ### Production (`go2url.xyz`)
 
 ```bash
 cp .env.example .env   # fill in JWT_SECRET and any overrides
-docker compose up -d --build
+docker compose --env-file .env -f docker-compose.prod.yml up -d
 ```
 
-Serves on `NGINX_PORT` (default `80`).
+No host ports are published by this stack. It's reachable only via the reverse proxy at `go2url.xyz`.
 
 ### Development (`dev.go2url.xyz`)
 
@@ -196,13 +272,28 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml pull
 docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
 ```
 
-Serves on `DEV_NGINX_PORT` (default `8080`). Point `dev.go2url.xyz`'s DNS/proxy (e.g. Cloudflare) at this port on the server, the same way `go2url.xyz` points at the production stack's `NGINX_PORT`.
+Reachable via the reverse proxy at `dev.go2url.xyz`, and directly on the host at:
+
+- Frontend: `http://<host>:3001` (`DEV_FRONTEND_PORT`)
+- Backend: `http://<host>:4001` (`DEV_BACKEND_PORT`)
+- Database: `<host>:5433` (`DEV_POSTGRES_PORT`)
+
+These dev ports are intentionally different from production's (which publishes none), so both stacks run simultaneously on the same server without port conflicts.
 
 To tear the dev stack down (including its database volume):
 
 ```bash
 docker compose --env-file .env.dev -f docker-compose.dev.yml down -v
 ```
+
+### Manual steps required after this refactor
+
+1. **Create the external network once per host**: `docker network create proxy-network` (idempotent — safe to re-run; `docker compose -f docker-compose.proxy.yml up -d` will fail with a clear error if it's missing).
+2. **Start the proxy stack** (`docker compose -f docker-compose.proxy.yml up -d`) before or after the app stacks — order doesn't matter, but nothing is reachable from the internet until the proxy is up.
+3. **Point DNS/Cloudflare at the proxy's host, port 80** (unchanged from before — Cloudflare still terminates TLS in front of the origin; the origin still speaks plain HTTP). No cert files are required for this setup. If the proxy should terminate TLS itself instead (e.g. bypassing Cloudflare, or using `certbot`), add cert files under `proxy/certs/`, add a `443 ssl` server block per host in `proxy/conf.d/`, and publish `443` — already reserved in `docker-compose.proxy.yml`.
+4. **Redeploy both app stacks** with the new compose files so they join `proxy-network` and drop their old published ports (prod) / move to new ports (dev).
+5. **If running dev locally for the first time**, update any bookmarks/scripts pointing at the old dev ports (previously proxied through `DEV_NGINX_PORT=8080`) to the new direct ports (`3001`/`4001`) or continue using `dev.go2url.xyz` through the proxy.
+6. **Known pre-existing issue fixed by this refactor**: `production.yml` referenced a nonexistent `docker-compose.yml` (the file was renamed to `docker-compose.prod.yml` in an earlier commit but the workflow wasn't updated). It now correctly references `docker-compose.prod.yml`.
 
 ## Database Models
 

@@ -69,7 +69,7 @@ jobs:
             record_prev() {
               local service="$1" outfile="$2"
               local cid
-              cid=$(docker compose --env-file .env -f docker-compose.yml images -q "$service")
+              cid=$(docker compose --env-file .env -f docker-compose.prod.yml images -q "$service")
               if [ -z "$cid" ]; then
                 : > "$outfile"
                 return
@@ -81,7 +81,7 @@ jobs:
 
             export BACKEND_IMAGE=${{ env.BACKEND_IMAGE }}:${{ github.sha }}
             export FRONTEND_IMAGE=${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
-            docker compose --env-file .env -f docker-compose.yml pull
+            docker compose --env-file .env -f docker-compose.prod.yml pull
 
       # --- Deploy Production ---
       - name: Deploy Production
@@ -96,7 +96,7 @@ jobs:
             export BACKEND_IMAGE=${{ env.BACKEND_IMAGE }}:${{ github.sha }}
             export FRONTEND_IMAGE=${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
 
-            docker compose --env-file .env -f docker-compose.yml up -d
+            docker compose --env-file .env -f docker-compose.prod.yml up -d
 
             docker image prune -f
 
@@ -150,7 +150,7 @@ jobs:
             export BACKEND_IMAGE=$BACKEND_PREV
             export FRONTEND_IMAGE=$FRONTEND_PREV
 
-            docker compose --env-file .env -f docker-compose.yml pull
-            docker compose --env-file .env -f docker-compose.yml up -d
+            docker compose --env-file .env -f docker-compose.prod.yml pull
+            docker compose --env-file .env -f docker-compose.prod.yml up -d
 
  
