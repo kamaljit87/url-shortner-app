@@ -22,7 +22,7 @@ services:
 
   backend:
     container_name: dev-backend
-    image: ${DEV_BACKEND_IMAGE:-ghcr.io/kamaljit87/url-shortner-app-backend}
+    image: ${DEV_BACKEND_IMAGE:-ghcr.io/kamaljit87/url-shortner-app-backend:${{ github.sha }}}
     restart: unless-stopped
     depends_on:
       db:
@@ -35,7 +35,7 @@ services:
 
   frontend:
     container_name: dev-frontend
-    image: ${DEV_FRONTEND_IMAGE:-ghcr.io/kamaljit87/url-shortner-app-frontend}
+    image: ${DEV_FRONTEND_IMAGE:-ghcr.io/kamaljit87/url-shortner-app-frontend:${{ github.sha }}}
     restart: unless-stopped
     depends_on:
       - backend
