@@ -18,45 +18,46 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - dev
+      - app-network
 
   backend:
-    image: ${DEV_BACKEND_IMAGE:-ghcr.io/kamaljit87/url-shortner-app-backend}
+    container_name: dev-backend
+    image: ${DEV_BACKEND_IMAGE}
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
-    expose:
-      - "4000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${DEV_JWT_SECRET}
+      JWT_EXPIRES_IN: ${DEV_JWT_EXPIRES_IN:-7d}
+      BASE_URL: ${DEV_BASE_URL:-http://localhost:4000}
+      FRONTEND_URL: ${DEV_FRONTEND_URL:-http://localhost:3000}
+      PORT: 4000
+    ports:
+      - "${DEV_BACKEND_PORT:-4001}:4000"
     networks:
-      - dev
+      - app-network
+      - proxy-network
 
   frontend:
-    image: ${DEV_FRONTEND_IMAGE:-ghcr.io/kamaljit87/url-shortner-app-frontend}
+    container_name: dev-frontend
+    image: ${DEV_FRONTEND_IMAGE}
     restart: unless-stopped
     depends_on:
       - backend
-    expose:
-      - "3000"
-    networks:
-      - dev
-
-  nginx:
-    image: nginx:1.27-alpine
-    restart: unless-stopped
-    depends_on:
-      - backend
-      - frontend
-    volumes:
-      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
     ports:
-      - "${DEV_NGINX_PORT:-8080}:80"
+      - "${DEV_FRONTEND_PORT:-3001}:3000"
     networks:
-      - dev
+      - app-network
+      - proxy-network
 
 volumes:
   dev_db_data:
 
 networks:
-  dev:
+  app-network:
     name: url-shortener-dev-net
+  proxy-network:
+    name: proxy-network
+    external: true
