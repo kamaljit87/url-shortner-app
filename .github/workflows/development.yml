@@ -211,19 +211,29 @@ jobs:
             -u "${{ github.actor }}" \
             --password-stdin
 
-            export DEV_BACKEND_IMAGE=${{ env.BACKEND_IMAGE }}:${{ github.sha }}
-            export DEV_FRONTEND_IMAGE=${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+            BACKEND_IMAGE="${{ env.BACKEND_IMAGE }}:${{ github.sha }}"
+            FRONTEND_IMAGE="${{ env.FRONTEND_IMAGE }}:${{ github.sha }}"
 
-            echo "Backend image: $DEV_BACKEND_IMAGE"
-            echo "Frontend image: $DEV_FRONTEND_IMAGE"
+            # Persist the deployed image tags
+            if grep -q "^DEV_BACKEND_IMAGE=" .env.dev; then
+              sed -i "s|^DEV_BACKEND_IMAGE=.*|DEV_BACKEND_IMAGE=${BACKEND_IMAGE}|" .env.dev
+            else
+            echo "DEV_BACKEND_IMAGE=${BACKEND_IMAGE}" >> .env.dev
+            fi
+
+            if grep -q "^DEV_FRONTEND_IMAGE=" .env.dev; then
+              sed -i "s|^DEV_FRONTEND_IMAGE=.*|DEV_FRONTEND_IMAGE=${FRONTEND_IMAGE}|" .env.dev
+            else
+              echo "DEV_FRONTEND_IMAGE=${FRONTEND_IMAGE}" >> .env.dev
+            fi
+
+            echo "Deploying:"
+            grep "^DEV_.*IMAGE=" .env.dev
 
             docker compose --env-file .env.dev -f docker-compose.dev.yml config
-
             docker compose --env-file .env.dev -f docker-compose.dev.yml pull
-
             docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --remove-orphans
-
-            docker image prune -f 
+            docker image prune -f
 
       - name: Wait for application
         run: sleep 20
