@@ -5,6 +5,7 @@ on:
   pull_request:
     types:
       - closed
+
 env:
   BACKEND_IMAGE: ghcr.io/${{ github.repository }}-backend:${{ github.sha }}
   FRONTEND_IMAGE: ghcr.io/${{ github.repository }}-frontend:${{ github.sha }}
@@ -19,125 +20,87 @@ jobs:
         github.event.pull_request.base.ref == 'main' &&
         github.event.pull_request.head.ref == 'development'
       )
+
     runs-on: ubuntu-latest
 
     permissions:
-      security-events: write
       contents: read
       packages: write
+      security-events: write
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-            fetch-depth: 0
 
       - name: Run Gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    
-
-      - name: Log in to GitHub Container Registry
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-     
-
-      # --- Pull Tested Images ---
-      # Images above were just built, scanned, and pushed under this exact
-      # commit SHA. This step is the handoff point: the Linode host pulls
-      # those SHA-tagged images from GHCR rather than trusting the ones it
-      # already has running.
-      - name: Pull Tested Images
+      - name: Deploy to Production
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.LINODE_HOST }}
           username: ${{ secrets.LINODE_USER }}
           key: ${{ secrets.LINODE_SSH_KEY }}
-          script: |
-            cd /root/url-shortner-app
-
-            docker login ghcr.io \
-              -u ${{ github.actor }} \
-              -p ${{ secrets.GHCR_PAT }}
-
-            record_prev() {
-              local service="$1" outfile="$2"
-              local cid
-              cid=$(docker compose --env-file .env -f docker-compose.prod.yml images -q "$service")
-              if [ -z "$cid" ]; then
-                : > "$outfile"
-                return
-              fi
-              docker inspect --format '{{index .RepoDigests 0}}' "$cid" 2>/dev/null > "$outfile" || : > "$outfile"
-            }
-            record_prev backend backend.prev
-            record_prev frontend frontend.prev
-
-            export BACKEND_IMAGE=${{ env.BACKEND_IMAGE }}:${{ github.sha }}
-            export FRONTEND_IMAGE=${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
-            docker compose --env-file .env -f docker-compose.prod.yml pull
-
-      # --- Deploy Production ---
-      - name: Deploy to Linode
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.LINODE_HOST }}
-          username: ${{ secrets.LINODE_USER }}
-          key: ${{ secrets.LINODE_SSH_KEY }}
+          envs: BACKEND_IMAGE,FRONTEND_IMAGE
           script: |
             set -euo pipefail
+
             cd /root/url-shortner-app
+
             git pull
+
             if [ ! -f docker-compose.prod.yml ] || [ ! -f .env ]; then
-            echo "docker-compose.prod.yml or .env missing in $(pwd)"
-            exit 1
+              echo "docker-compose.prod.yml or .env not found"
+              exit 1
             fi
 
             echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io \
-            -u "${{ github.actor }}" \
-            --password-stdin
+              -u "${{ github.actor }}" \
+              --password-stdin
 
-            BACKEND_IMAGE="${{ env.BACKEND_IMAGE }}:${{ github.sha }}"
-            FRONTEND_IMAGE="${{ env.FRONTEND_IMAGE }}:${{ github.sha }}"
+            # Save current deployment for rollback
+            grep '^BACKEND_IMAGE=' .env | cut -d= -f2- > backend.prev || true
+            grep '^FRONTEND_IMAGE=' .env | cut -d= -f2- > frontend.prev || true
 
-            # Persist deployed image tags
-            if grep -q "^BACKEND_IMAGE=" .env; then
-              sed -i "s|^BACKEND_IMAGE=.*|BACKEND_IMAGE=${BACKEND_IMAGE}|" .env
+            # Update image tags
+            if grep -q '^BACKEND_IMAGE=' .env; then
+              sed -i "s|^BACKEND_IMAGE=.*|BACKEND_IMAGE=$BACKEND_IMAGE|" .env
             else
-              echo "BACKEND_IMAGE=${BACKEND_IMAGE}" >> .env
+              echo "BACKEND_IMAGE=$BACKEND_IMAGE" >> .env
             fi
 
-            if grep -q "^FRONTEND_IMAGE=" .env; then
-              sed -i "s|^FRONTEND_IMAGE=.*|FRONTEND_IMAGE=${FRONTEND_IMAGE}|" .env
+            if grep -q '^FRONTEND_IMAGE=' .env; then
+              sed -i "s|^FRONTEND_IMAGE=.*|FRONTEND_IMAGE=$FRONTEND_IMAGE|" .env
             else
-              echo "FRONTEND_IMAGE=${FRONTEND_IMAGE}" >> .env
+              echo "FRONTEND_IMAGE=$FRONTEND_IMAGE" >> .env
             fi
 
-            echo "Deploying:"
-            grep ".*IMAGE=" .env
+            echo "Deploying images:"
+            grep 'IMAGE=' .env
 
-            docker compose --env-file .env -f docker-compose.prod.yml config
             docker compose --env-file .env -f docker-compose.prod.yml pull
             docker compose --env-file .env -f docker-compose.prod.yml up -d --remove-orphans
 
-             docker image prune -f
-      # --- Health Check ---
+            docker image prune -f
+
       - name: Wait for application
         run: sleep 20
 
       - name: Health Check
-        id: health_check
-        run: curl --fail https://go2url.xyz
+        run: |
+          curl --fail https://go2url.xyz
+          curl --fail https://go2url.xyz/health
 
-      # --- Smoke Tests ---
       - name: Smoke Tests
-        id: smoke_tests
         run: |
           curl --fail https://go2url.xyz
           curl --fail https://go2url.xyz/health
@@ -146,7 +109,7 @@ jobs:
       - name: OWASP ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.14.0
         with:
-          target: "https://go2url.xyz"
+          target: https://go2url.xyz
           allow_issue_writing: false
 
       - name: Upload ZAP Report
@@ -155,7 +118,6 @@ jobs:
           name: zap-report
           path: report_html.html
 
-      # --- Rollback (optional) ---
       - name: Rollback on failure
         if: failure()
         uses: appleboy/ssh-action@v1.2.0
@@ -164,20 +126,20 @@ jobs:
           username: ${{ secrets.LINODE_USER }}
           key: ${{ secrets.LINODE_SSH_KEY }}
           script: |
+            set -e
+
             cd /root/url-shortner-app
 
             BACKEND_PREV=$(cat backend.prev 2>/dev/null || true)
             FRONTEND_PREV=$(cat frontend.prev 2>/dev/null || true)
 
             if [ -z "$BACKEND_PREV" ] || [ -z "$FRONTEND_PREV" ]; then
-              echo "No previous image recorded, cannot roll back automatically." >&2
-              exit 1
+              echo "No previous deployment found. Skipping rollback."
+              exit 0
             fi
 
-            export BACKEND_IMAGE=$BACKEND_PREV
-            export FRONTEND_IMAGE=$FRONTEND_PREV
+            sed -i "s|^BACKEND_IMAGE=.*|BACKEND_IMAGE=$BACKEND_PREV|" .env
+            sed -i "s|^FRONTEND_IMAGE=.*|FRONTEND_IMAGE=$FRONTEND_PREV|" .env
 
             docker compose --env-file .env -f docker-compose.prod.yml pull
-            docker compose --env-file .env -f docker-compose.prod.yml up -d
-
- 
+            docker compose --env-file .env -f docker-compose.prod.yml up -d --remove-orphans
