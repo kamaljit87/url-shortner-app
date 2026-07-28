@@ -128,20 +128,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set image tag
+        id: tag
+        run: echo "value=$(date +%Y.%m.%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - name: Build backend Docker image
         run: |
           docker build ./backend --file backend/Dockerfile \
             -t $BACKEND_IMAGE:dev \
-            -t $BACKEND_IMAGE:${{ github.sha }}
+            -t $BACKEND_IMAGE:${{ steps.tag.outputs.value }}
 
       - name: Scan Backend Image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+          image-ref: ${{ env.BACKEND_IMAGE }}:${{ steps.tag.outputs.value }}
           format: sarif
           output: backend-image.sarif
           severity: HIGH,CRITICAL
-          
+
       - name: Upload Backend Image Report
         uses: actions/upload-artifact@v4
         with:
@@ -159,12 +163,12 @@ jobs:
           docker build ./frontend --file frontend/Dockerfile \
             --build-arg NEXT_PUBLIC_API_URL=${{ vars.DEV_NEXT_PUBLIC_API_URL }} \
             -t $FRONTEND_IMAGE:dev \
-            -t $FRONTEND_IMAGE:${{ github.sha }}
+            -t $FRONTEND_IMAGE:${{ steps.tag.outputs.value }}
 
       - name: Scan Frontend Image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+          image-ref: ${{ env.FRONTEND_IMAGE }}:${{ steps.tag.outputs.value }}
           format: sarif
           output: frontend-image.sarif
           severity: HIGH,CRITICAL
@@ -184,12 +188,12 @@ jobs:
       - name: Push backend Docker image
         run: |
           docker push $BACKEND_IMAGE:dev
-          docker push $BACKEND_IMAGE:${{ github.sha }}
+          docker push $BACKEND_IMAGE:${{ steps.tag.outputs.value }}
 
       - name: Push frontend Docker image
         run: |
           docker push $FRONTEND_IMAGE:dev
-          docker push $FRONTEND_IMAGE:${{ github.sha }}
+          docker push $FRONTEND_IMAGE:${{ steps.tag.outputs.value }}
 
       - name: Deploy to Linode
         uses: appleboy/ssh-action@v1.2.0
@@ -210,8 +214,8 @@ jobs:
             -u "${{ github.actor }}" \
             --password-stdin
 
-            BACKEND_IMAGE="${{ env.BACKEND_IMAGE }}:${{ github.sha }}"
-            FRONTEND_IMAGE="${{ env.FRONTEND_IMAGE }}:${{ github.sha }}"
+            BACKEND_IMAGE="${{ env.BACKEND_IMAGE }}:${{ steps.tag.outputs.value }}"
+            FRONTEND_IMAGE="${{ env.FRONTEND_IMAGE }}:${{ steps.tag.outputs.value }}"
 
             # Persist the deployed image tags
             if grep -q "^DEV_BACKEND_IMAGE=" .env.dev; then
@@ -256,7 +260,7 @@ jobs:
       - name: Generate Backend SBOM
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+          image-ref: ${{ env.BACKEND_IMAGE }}:${{ steps.tag.outputs.value }}
           format: cyclonedx
           output: backend-sbom.json
 
@@ -269,7 +273,7 @@ jobs:
       - name: Generate Frontend SBOM
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+          image-ref: ${{ env.FRONTEND_IMAGE }}:${{ steps.tag.outputs.value }}
           format: cyclonedx
           output: frontend-sbom.json
 
@@ -304,4 +308,7 @@ jobs:
           --base main \
           --head development \
           --title "Promote development to production" \
-          --body "Development pipeline completed successfully."
+          --body "Development pipeline completed successfully.
+
+          <!-- image-tag: ${{ steps.tag.outputs.value }} -->
+          Image tag: \`${{ steps.tag.outputs.value }}\`"
