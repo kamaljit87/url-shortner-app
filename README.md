@@ -250,11 +250,13 @@ docker compose --env-file .env -f docker-compose.prod.yml up -d
 
 No host ports are published by this stack. It's reachable only via the reverse proxy at `go2url.xyz`.
 
+In normal operation, `.github/workflows/production.yml` runs this for you: it triggers when the auto-generated "Promote development to production" PR (opened by `development.yml`) is merged into `main`, and deploys the **exact same image tag** that `development.yml` built and tested — it does not rebuild from source. It reads that tag from a `<!-- image-tag: ... -->` marker in the PR body. It can also be run manually via `workflow_dispatch`, in which case you supply the `image_tag` input directly (e.g. `2026.07.28-a1b2c3d`, copied from a prior dev deploy).
+
 ### Development (`dev.go2url.xyz`)
 
 A fully separate stack — its own containers, network, volume, and Postgres database — so it can run alongside production on the same server without collisions.
 
-Unlike production, the dev stack doesn't build images locally. `.github/workflows/development.yml` builds the backend and frontend images on every push to the `development` branch, pushes them to GHCR (`ghcr.io/kamaljit87/url-shortner-app-backend`/`-frontend`, tagged `dev` and by commit SHA), and SSHes into the server to pull and restart the stack. That workflow needs these GitHub repository secrets/variables configured once:
+Unlike production, the dev stack doesn't build images locally. `.github/workflows/development.yml` builds the backend and frontend images on every push to the `development` branch, pushes them to GHCR (`ghcr.io/kamaljit87/url-shortner-app-backend`/`-frontend`, tagged `dev` and with an immutable `YYYY.MM.DD-<short-sha>` tag), and SSHes into the server to pull and restart the stack. That workflow needs these GitHub repository secrets/variables configured once:
 
 - Secrets: `LINODE_HOST`, `LINODE_USER`, `LINODE_SSH_KEY`, `GHCR_PAT`
 - Variables: `DEV_NEXT_PUBLIC_API_URL` (baked into the frontend at build time, e.g. `https://dev.go2url.xyz`)
